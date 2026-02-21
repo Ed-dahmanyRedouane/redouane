@@ -3,24 +3,26 @@ package com.bookshop.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.util.List;
-
 @Entity
-@Table(name = "categories")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Category {
+public class Role {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true, length = 100)
+    @Column(unique = true)
     private String name;
 
-    @OneToMany(mappedBy = "category")
-    private List<Book> books;
+    public String getRole() {
+        return name;
+    }
+
+    public void setRole(String role) {
+        this.name = role;
+    }
 }
