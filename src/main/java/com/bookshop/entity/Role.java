@@ -3,26 +3,21 @@ package com.bookshop.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.util.HashSet;
+import java.util.Set;
+
 @Entity
+@AllArgsConstructor
+@NoArgsConstructor
+@Builder
 @Getter
 @Setter
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
+@ToString
 public class Role {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
-    @Column(unique = true)
-    private String name;
-
-    public String getRole() {
-        return name;
-    }
-
-    public void setRole(String role) {
-        this.name = role;
-    }
+    private String role;
+    @ManyToMany(mappedBy = "roles")
+    private Set<UserAccount> users = new HashSet<>();
 }
