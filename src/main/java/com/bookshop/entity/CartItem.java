@@ -1,15 +1,15 @@
 package com.bookshop.entity;
 
 import jakarta.persistence.*;
-import jakarta.validation.constraints.*;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 import lombok.*;
 
 import java.math.BigDecimal;
 
 @Entity
-@Table(name = "cart_items")
-@Getter
-@Setter
+@Table(name = "cart_items", uniqueConstraints = @UniqueConstraint(columnNames = { "user_id", "book_id" }))
+@Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -19,20 +19,28 @@ public class CartItem {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
-    private UserAccount user;
+    @ToString.Exclude
+    private User user;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "book_id", nullable = false)
     private Book book;
 
     @NotNull
-    @Min(1)
+    @Min(value = 1, message = "Quantity must be at least 1")
     @Column(nullable = false)
     private Integer quantity;
 
     @NotNull
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal unitPrice;
+
+    /**
+     * Calculates the sub-total for this cart item.
+     */
+    public BigDecimal getSubTotal() {
+        return unitPrice.multiply(BigDecimal.valueOf(quantity));
+    }
 }

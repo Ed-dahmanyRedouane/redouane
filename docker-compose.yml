@@ -1,29 +1,37 @@
-services:
-  mysql:
-    image: mysql:8
-    container_name: bookshop-mysql
-    environment:
-      MYSQL_DATABASE: bookshop_db
-      MYSQL_ROOT_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
+version: '3.9'
 
-  app:
-    build: .
+services:
+  bookshop-api:
+    image: edredouane/bookshop-api:latest
     container_name: bookshop-api
+    restart: unless-stopped
     ports:
       - "8080:8080"
-    depends_on:
-      - mysql
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/bookshop_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      # ---- Database (MySQL pre-installed on host) ----
+      SPRING_DATASOURCE_URL: jdbc:mysql://host.docker.internal:3306/bookshop_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+      # ---- JPA / Hibernate ----
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_JPA_SHOW_SQL: "false"
+      # ---- JWT ----
       JWT_SECRET: ${JWT_SECRET}
-    env_file:
-      - .env
-
-volumes:
-  mysql_data:
+      JWT_EXPIRATION: 86400000
+      # ---- Spring Boot ----
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8080
+    # Resolve "host.docker.internal" to Docker gateway
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

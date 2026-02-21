@@ -1,5 +1,6 @@
 package com.bookshop.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.*;
 import lombok.*;
@@ -8,8 +9,7 @@ import java.math.BigDecimal;
 
 @Entity
 @Table(name = "books")
-@Getter
-@Setter
+@Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -19,28 +19,29 @@ public class Book {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @NotBlank
+    @NotBlank(message = "Title is required")
     @Column(nullable = false, length = 255)
     private String title;
 
-    @NotBlank
+    @NotBlank(message = "Author is required")
     @Column(nullable = false, length = 150)
     private String author;
 
-    @NotNull
-    @DecimalMin(value = "0.01")
+    @NotNull(message = "Price is required")
+    @DecimalMin(value = "0.0", inclusive = false, message = "Price must be positive")
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal price;
 
-    @NotNull
-    @Min(0)
+    @Min(value = 0, message = "Stock cannot be negative")
     @Column(nullable = false)
-    private Integer stock;
+    @Builder.Default
+    private Integer stock = 0;
 
     @Column(columnDefinition = "TEXT")
     private String description;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "category_id", nullable = false)
+    @JsonIgnoreProperties({ "books", "hibernateLazyInitializer" })
     private Category category;
 }

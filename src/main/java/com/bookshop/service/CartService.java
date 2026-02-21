@@ -3,12 +3,15 @@ package com.bookshop.service;
 import com.bookshop.dto.*;
 import com.bookshop.entity.Book;
 import com.bookshop.entity.CartItem;
-import com.bookshop.entity.UserAccount;
+import com.bookshop.entity.User;
 import com.bookshop.repository.BookRepository;
 import com.bookshop.repository.CartItemRepository;
+import com.bookshop.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -21,20 +24,25 @@ public class CartService {
 
     private final CartItemRepository cartItemRepository;
     private final BookRepository bookRepository;
+    private final UserRepository userRepository;
 
-    public CartResponse getUserCart(UserAccount user) {
+    /**
+     * Returns the full cart for the authenticated user.
+     */
+    public CartResponse getCart(String email) {
+        User user = findUserByEmail(email);
         List<CartItem> cartItems = cartItemRepository.findByUser(user);
-        
+
         List<CartItemResponse> itemResponses = cartItems.stream()
-                .map(this::convertToResponse)
+                .map(this::toCartItemResponse)
                 .collect(Collectors.toList());
 
-        BigDecimal totalAmount = itemResponses.stream()
-                .map(CartItemResponse::getTotalPrice)
+        BigDecimal totalAmount = cartItems.stream()
+                .map(CartItem::getSubTotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        Integer totalItems = itemResponses.stream()
-                .mapToInt(CartItemResponse::getQuantity)
+        int totalItems = cartItems.stream()
+                .mapToInt(CartItem::getQuantity)
                 .sum();
 
         return CartResponse.builder()
@@ -44,81 +52,105 @@ public class CartService {
                 .build();
     }
 
+    /**
+     * Adds a book to the cart. If the book already exists, increments quantity.
+     */
     @Transactional
-    public CartItemResponse addToCart(UserAccount user, CartItemRequest request) {
+    public CartResponse addItem(String email, CartItemRequest request) {
+        User user = findUserByEmail(email);
         Book book = bookRepository.findById(request.getBookId())
-                .orElseThrow(() -> new RuntimeException("Livre non trouvé avec l'ID: " + request.getBookId()));
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Book not found with id: " + request.getBookId()));
 
         if (book.getStock() < request.getQuantity()) {
-            throw new RuntimeException("Stock insuffisant pour le livre: " + book.getTitle());
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "Insufficient stock for book: " + book.getTitle());
         }
 
-        CartItem existingItem = cartItemRepository.findByUserAndBook_Id(user, request.getBookId())
-                .orElse(null);
+        // Upsert: if item already exists for this user+book, add quantity
+        CartItem cartItem = cartItemRepository.findByUserAndBook_Id(user, request.getBookId())
+                .map(existing -> {
+                    int newQty = existing.getQuantity() + request.getQuantity();
+                    if (book.getStock() < newQty) {
+                        throw new ResponseStatusException(
+                                HttpStatus.BAD_REQUEST, "Insufficient stock for book: " + book.getTitle());
+                    }
+                    existing.setQuantity(newQty);
+                    return existing;
+                })
+                .orElseGet(() -> CartItem.builder()
+                        .user(user)
+                        .book(book)
+                        .quantity(request.getQuantity())
+                        .unitPrice(book.getPrice())
+                        .build());
 
-        if (existingItem != null) {
-            int newQuantity = existingItem.getQuantity() + request.getQuantity();
-            if (book.getStock() < newQuantity) {
-                throw new RuntimeException("Stock insuffisant pour le livre: " + book.getTitle());
-            }
-            existingItem.setQuantity(newQuantity);
-            CartItem updatedItem = cartItemRepository.save(existingItem);
-            return convertToResponse(updatedItem);
-        } else {
-            CartItem newItem = CartItem.builder()
-                    .user(user)
-                    .book(book)
-                    .quantity(request.getQuantity())
-                    .unitPrice(book.getPrice())
-                    .build();
-            CartItem savedItem = cartItemRepository.save(newItem);
-            return convertToResponse(savedItem);
-        }
+        cartItemRepository.save(cartItem);
+        return getCart(email);
     }
 
+    /**
+     * Updates the quantity of a specific cart item.
+     */
     @Transactional
-    public CartItemResponse updateCartItem(UserAccount user, Long itemId, CartItemUpdateRequest request) {
+    public CartResponse updateItem(String email, Long itemId, CartItemRequest request) {
+        User user = findUserByEmail(email);
         CartItem cartItem = cartItemRepository.findById(itemId)
-                .orElseThrow(() -> new RuntimeException("Article du panier non trouvé avec l'ID: " + itemId));
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Cart item not found with id: " + itemId));
 
         if (!cartItem.getUser().getId().equals(user.getId())) {
-            throw new RuntimeException("Cet article n'appartient pas à votre panier");
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN, "This cart item does not belong to you");
         }
 
         if (cartItem.getBook().getStock() < request.getQuantity()) {
-            throw new RuntimeException("Stock insuffisant pour le livre: " + cartItem.getBook().getTitle());
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "Insufficient stock for book: " + cartItem.getBook().getTitle());
         }
 
         cartItem.setQuantity(request.getQuantity());
-        CartItem updatedItem = cartItemRepository.save(cartItem);
-        return convertToResponse(updatedItem);
+        cartItemRepository.save(cartItem);
+        return getCart(email);
     }
 
+    /**
+     * Removes a specific item from the cart.
+     */
     @Transactional
-    public void deleteCartItem(UserAccount user, Long itemId) {
+    public void removeItem(String email, Long itemId) {
+        User user = findUserByEmail(email);
         CartItem cartItem = cartItemRepository.findById(itemId)
-                .orElseThrow(() -> new RuntimeException("Article du panier non trouvé avec l'ID: " + itemId));
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Cart item not found with id: " + itemId));
 
         if (!cartItem.getUser().getId().equals(user.getId())) {
-            throw new RuntimeException("Cet article n'appartient pas à votre panier");
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN, "This cart item does not belong to you");
         }
 
         cartItemRepository.delete(cartItem);
     }
 
-    private CartItemResponse convertToResponse(CartItem cartItem) {
-        BigDecimal totalPrice = cartItem.getUnitPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
-        
+    // ── Private helpers ──────────────────────────────────────
+
+    private User findUserByEmail(String email) {
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "User not found"));
+    }
+
+    private CartItemResponse toCartItemResponse(CartItem item) {
         return CartItemResponse.builder()
-                .id(cartItem.getId())
-                .book(convertBookToResponse(cartItem.getBook()))
-                .quantity(cartItem.getQuantity())
-                .unitPrice(cartItem.getUnitPrice())
-                .totalPrice(totalPrice)
+                .id(item.getId())
+                .book(toBookResponse(item.getBook()))
+                .quantity(item.getQuantity())
+                .unitPrice(item.getUnitPrice())
+                .totalPrice(item.getSubTotal())
                 .build();
     }
 
-    private BookResponse convertBookToResponse(Book book) {
+    private BookResponse toBookResponse(Book book) {
         return BookResponse.builder()
                 .id(book.getId())
                 .title(book.getTitle())
@@ -126,14 +158,10 @@ public class CartService {
                 .price(book.getPrice())
                 .stock(book.getStock())
                 .description(book.getDescription())
-                .category(convertCategoryToResponse(book.getCategory()))
-                .build();
-    }
-
-    private CategoryResponse convertCategoryToResponse(com.bookshop.entity.Category category) {
-        return CategoryResponse.builder()
-                .id(category.getId())
-                .name(category.getName())
+                .category(CategoryResponse.builder()
+                        .id(book.getCategory().getId())
+                        .name(book.getCategory().getName())
+                        .build())
                 .build();
     }
 }
