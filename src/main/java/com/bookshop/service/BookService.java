@@ -60,6 +60,25 @@ public class BookService {
         bookRepository.deleteById(id);
     }
 
+    @Transactional
+    public BookResponse updateBook(Long id, BookRequest bookRequest) {
+        Book book = bookRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Livre non trouvé avec l'ID: " + id));
+        
+        Category category = categoryRepository.findById(bookRequest.getCategoryId())
+                .orElseThrow(() -> new RuntimeException("Catégorie non trouvée avec l'ID: " + bookRequest.getCategoryId()));
+
+        book.setTitle(bookRequest.getTitle());
+        book.setAuthor(bookRequest.getAuthor());
+        book.setPrice(bookRequest.getPrice());
+        book.setStock(bookRequest.getStock());
+        book.setDescription(bookRequest.getDescription());
+        book.setCategory(category);
+
+        Book updatedBook = bookRepository.save(book);
+        return convertToResponse(updatedBook);
+    }
+
     private BookResponse convertToResponse(Book book) {
         return BookResponse.builder()
                 .id(book.getId())
