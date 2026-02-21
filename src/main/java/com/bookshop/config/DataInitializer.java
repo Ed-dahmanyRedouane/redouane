@@ -20,6 +20,9 @@ public class DataInitializer implements CommandLineRunner {
     private final RoleRepository roleRepo;
     private final PasswordEncoder passwordEncoder;
 
+
+
+
     @Override
     public void run(String... args) throws Exception {
 
