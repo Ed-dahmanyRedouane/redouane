@@ -7,10 +7,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class CartItemRequest {
-    
-    @NotNull(message = "L'ID du livre est obligatoire")
-    private Long bookId;
+public class CartItemUpdateRequest {
     
     @NotNull(message = "La quantité est obligatoire")
     @Min(value = 1, message = "La quantité doit être au moins 1")
