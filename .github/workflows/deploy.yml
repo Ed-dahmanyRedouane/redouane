@@ -1,0 +1,138 @@
+name: BookShop CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  JAVA_VERSION: '21'
+  WORKING_DIR: /home/${{ secrets.SERVER_USER }}/bookshop
+
+jobs:
+  # ==================================================
+  # Job 1 : Build & Tests
+  # ==================================================
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build with Maven
+        run: mvn clean verify -B
+        env:
+          SPRING_DATASOURCE_URL: jdbc:h2:mem:testdb
+          SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.h2.Driver
+          SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.H2Dialect
+          JWT_SECRET: test_secret_for_ci_pipeline_only_not_production
+          JWT_EXPIRATION: 86400000
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: target/surefire-reports/
+
+  # ==================================================
+  # Job 2: Build Docker Image (only on push to main)
+  # ==================================================
+  docker-build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (local check)
+        run: |
+          docker build -t bookshop-api:${{ github.sha }} .
+          echo "Docker image built successfully: bookshop-api:${{ github.sha }}"
+
+  # ==================================================
+  # Job 3: Deploy to Server via SSH
+  # ==================================================
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'ENDSSH'
+            set -e
+            echo "=== Starting deployment ==="
+          
+            # Navigate to working directory
+            cd /home/${{ secrets.SERVER_USER }}/bookshop
+          
+            # Pull latest code from main
+            git fetch origin main
+            git reset --hard origin/main
+          
+            # Create env file from secrets (never committed to git)
+            cat > .env << 'EOF'
+            MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            EOF
+          
+            echo "=== Building and starting containers ==="
+            docker compose down --remove-orphans || true
+            docker compose up -d --build
+          
+            echo "=== Waiting for application to start ==="
+            sleep 30
+          
+            # Health check
+            echo "=== Running health check ==="
+            for i in $(seq 1 10); do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/actuator/health || echo "000")
+              echo "Attempt $i: HTTP $STATUS"
+              if [ "$STATUS" = "200" ]; then
+                echo "Health check PASSED"
+                break
+              fi
+              if [ "$i" = "10" ]; then
+                echo "Health check FAILED after 10 attempts"
+                docker compose logs bookshop-api
+                exit 1
+              fi
+              sleep 10
+            done
+          
+            echo "=== Deployment successful! ==="
+            docker compose ps
+          ENDSSH
+
+      - name: Verify deployment
+        run: |
+          echo "Verifying external access..."
+          sleep 5
+          curl -f http://${{ secrets.SERVER_HOST }}:8080/actuator/health \
+            && echo "External health check PASSED" \
+            || echo "Warning: External check failed (check firewall)"

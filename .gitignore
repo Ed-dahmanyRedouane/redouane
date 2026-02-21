@@ -3,6 +3,8 @@ target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
+.env
+
 
 ### STS ###
 .apt_generated
@@ -31,3 +33,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### if you have any local configuration files, you can add them here
+.env
